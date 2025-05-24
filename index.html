@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Public File Sharing</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #file-list, #admin-file-list { margin: 20px 0; border: 1px dashed #ccc; padding: 10px; }
+        .file-item { margin: 10px 0; padding: 10px; background: #f9f9f9; }
+        button { background: #4CAF50; color: white; border: none; padding: 8px 15px; cursor: pointer; }
+        #admin-panel { margin-top: 30px; background: #f0f0f0; padding: 15px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Public File Sharing</h1>
+    <input type="file" id="file-input">
+    <input type="text" id="file-name" placeholder="Name this file">
+    <button onclick="uploadFile()">Upload File</button>
+    <div id="file-list">Loading files...</div>
+
+    <!-- Admin Panel -->
+    <button onclick="showAdminLogin()" style="background: #d9534f;">Admin Login</button>
+    <div id="admin-panel" style="display: none;">
+        <h2>Admin Panel</h2>
+        <input type="password" id="admin-password" placeholder="Enter admin password">
+        <button onclick="verifyAdmin()">Unlock</button>
+        <div id="admin-controls" style="display: none;">
+            <h3>All Files</h3>
+            <div id="admin-file-list"></div>
+            <button onclick="deleteAllFiles()" style="background: #d9534f;">Delete All Files</button>
+        </div>
+    </div>
+
+    <!-- Include Supabase JS -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script>
+        // Configure Supabase
+        const supabaseUrl = 'YOUR_SUPABASE_URL';
+        const supabaseKey = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+        // --- Public File Upload ---
+        async function uploadFile() {
+            const fileInput = document.getElementById('file-input');
+            const fileNameInput = document.getElementById('file-name');
+            
+            if (!fileInput.files[0] || !fileNameInput.value) {
+                alert("Please select a file and name it!");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const fileName = fileNameInput.value;
+
+            // Upload to Supabase Storage
+            const { data, error } = await supabase.storage
+                .from('public-files')
+                .upload(`${Date.now()}_${file.name}`, file);
+
+            if (error) {
+                alert("Upload failed: " + error.message);
+                return;
+            }
+
+            // Add to the database (for listing)
+            await supabase.from('files').insert([{ name: fileName, url: data.path }]);
+            alert("File uploaded!");
+            loadFiles(); // Refresh the list
+        }
+
+        // Display files to public
+        async function loadFiles() {
+            const { data: files, error } = await supabase.from('files').select('*');
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = '';
+
+            if (!files || files.length === 0) {
+                fileList.innerHTML = '<p>No files yet.</p>';
+                return;
+            }
+
+            files.forEach(file => {
+                const fileUrl = `${supabaseUrl}/storage/v1/object/public/public-files/${file.url}`;
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    <strong>${file.name}</strong>
+                    <a href="${fileUrl}" download>Download</a>
+                `;
+                fileList.appendChild(fileItem);
+            });
+        }
+
+        // --- Admin Controls (Password: Ankur@123) ---
+        const ADMIN_PASSWORD = "Ankur@123"; 
+
+        function showAdminLogin() {
+            document.getElementById('admin-panel').style.display = 'block';
+        }
+
+        function verifyAdmin() {
+            const password = document.getElementById('admin-password').value;
+            if (password === ADMIN_PASSWORD) {
+                document.getElementById('admin-controls').style.display = 'block';
+                loadAdminFiles();
+            } else {
+                alert("Wrong password!");
+            }
+        }
+
+        async function loadAdminFiles() {
+            const { data: files, error } = await supabase.from('files').select('*');
+            const list = document.getElementById('admin-file-list');
+            list.innerHTML = '';
+            
+            files.forEach(file => {
+                const fileUrl = `${supabaseUrl}/storage/v1/object/public/public-files/${file.url}`;
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    <strong>${file.name}</strong> 
+                    <a href="${fileUrl}" download>Download</a>
+                    <button onclick="deleteFile('${file.url}')" style="background: #d9534f;">Delete</button>
+                `;
+                list.appendChild(fileItem);
+            });
+        }
+
+        async function deleteFile(filePath) {
+            if (!confirm("Delete this file permanently?")) return;
+            await supabase.storage.from('public-files').remove([filePath]);
+            await supabase.from('files').delete().eq('url', filePath);
+            loadAdminFiles();
+            loadFiles(); // Update public view
+        }
+
+        async function deleteAllFiles() {
+            if (!confirm("Delete ALL files permanently?")) return;
+            await supabase.storage.from('public-files').remove(['*']);
+            await supabase.from('files').delete().neq('id', 0);
+            loadAdminFiles();
+            loadFiles();
+        }
+
+        // Load files on page start
+        loadFiles();
+    </script>
+</body>
+</html>
